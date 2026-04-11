@@ -1,0 +1,14 @@
+uvicorn
+transformers
+torch
+fastapi
+dotenv
+langchain_google_genai
+-U langchain
+resend
+python-jose[cryptography]
+passlib[bcrypt] 
+langchain-community 
+chromadb 
+tiktoken 
+pypdf
