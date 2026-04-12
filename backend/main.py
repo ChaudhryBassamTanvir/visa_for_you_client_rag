@@ -252,3 +252,48 @@ async def trello_webhook(request: Request):
     except Exception as e:
         print(f"❌ Trello webhook error: {e}")
     return {"status": "ok"}
+
+@app.post("/whatsapp/webhook")
+async def whatsapp_webhook(request: Request):
+    data = await request.json()
+    try:
+        entry        = data["entry"][0]
+        changes      = entry["changes"][0]
+        value        = changes["value"]
+        if "messages" not in value:
+            return {"status": "no message"}
+
+        message_data = value["messages"][0]
+        from_number  = message_data["from"]
+
+        if message_data.get("type") != "text":
+            send_whatsapp_message(from_number, "Sorry, I can only process text messages.")
+            return {"status": "non-text"}
+
+        user_message = message_data["text"]["body"]
+        print(f"📱 WhatsApp from {from_number}: {user_message}")
+
+        # Get or create DB client for this WA number
+        from db.database import get_or_create_client
+        from services.visa_agent import run_visa_agent
+
+        client_id = get_or_create_client(
+            name=f"WA {from_number}",
+            channel="whatsapp",
+            phone=from_number
+        )
+
+        user_data = {
+            "name":   f"WA {from_number}",
+            "email":  "",
+            "cgpa":   "",
+            "degree": "",
+            "phone":  from_number,
+        }
+
+        response = run_visa_agent(user_message, user_id=client_id, user_data=user_data)
+        send_whatsapp_message(from_number, response)
+
+    except Exception as e:
+        print(f"❌ WhatsApp error: {e}")
+    return {"status": "ok"}
