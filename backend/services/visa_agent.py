@@ -183,17 +183,17 @@ When student gives their name, save it. When they give CGPA save it. Build profi
             )
 
             # Save appointment to DB
+           # ✅ Correct
             create_appointment(
-                client_name=client_name,
-                client_email=client_email,
-                client_phone=client_phone,
-                preferred_date=date,
-                preferred_time=time,
-                purpose=purpose,
-                trello_url=card_url,
-                user_id=user_id
-            )
-
+             client_name=client_name,
+             client_email=client_email,
+             client_phone=client_phone,
+             preferred_date=date,
+             preferred_time=time,
+             purpose=purpose,
+             trello_url=card_url,
+             user_id=user_id          # ✅ correct parameter name
+                            )
             # Send email notification
             send_appointment_email({
                 "client_name":    client_name,
