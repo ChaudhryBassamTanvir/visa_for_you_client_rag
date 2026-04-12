@@ -16,7 +16,7 @@ from datetime import datetime
 load_dotenv()
 
 llm = ChatGoogleGenerativeAI(
-    model="gemini-1.5-flash",
+    model="gemini-3-flash-preview",
     google_api_key=os.getenv("GEMINI_API_KEY")
 )
 
@@ -33,7 +33,6 @@ def create_trello_appointment(title: str, description: str) -> str:
     }
     response = requests.post(url, params=params)
     if response.status_code == 200:
-        print("✅ Trello appointment card created")
         return response.json().get("shortUrl", "")
     print(f"❌ Trello error: {response.status_code} {response.text}")
     return ""
@@ -55,7 +54,7 @@ def send_appointment_email(appointment: dict):
                 </td></tr>
                 <tr><td style="padding:28px 36px;">
                   <table width="100%" style="border:1px solid #e8e8e6;border-radius:8px;overflow:hidden;">
-                    <tr style="background:#f9f9f8;"><td style="padding:10px 16px;font-size:12px;color:#999;width:130px;">Name</td><td style="padding:10px 16px;font-size:14px;font-weight:500;">{appointment['client_name']}</td></tr>
+                    <tr style="background:#f9f9f8;"><td style="padding:10px 16px;font-size:12px;color:#999;width:130px;">Client Name</td><td style="padding:10px 16px;font-size:14px;font-weight:500;">{appointment['client_name']}</td></tr>
                     <tr><td style="padding:10px 16px;font-size:12px;color:#999;border-top:1px solid #f0f0f0;">Email</td><td style="padding:10px 16px;font-size:14px;border-top:1px solid #f0f0f0;">{appointment['client_email']}</td></tr>
                     <tr style="background:#f9f9f8;"><td style="padding:10px 16px;font-size:12px;color:#999;border-top:1px solid #f0f0f0;">Phone</td><td style="padding:10px 16px;font-size:14px;border-top:1px solid #f0f0f0;">{appointment['client_phone']}</td></tr>
                     <tr><td style="padding:10px 16px;font-size:12px;color:#999;border-top:1px solid #f0f0f0;">Date</td><td style="padding:10px 16px;font-size:14px;border-top:1px solid #f0f0f0;">{appointment['preferred_date']}</td></tr>
@@ -68,7 +67,7 @@ def send_appointment_email(appointment: dict):
                   <a href="{appointment.get('trello_url','#')}" style="display:inline-block;padding:11px 24px;background:#1a1a1a;color:#fff;border-radius:8px;text-decoration:none;font-size:13px;font-weight:500;">View on Trello →</a>
                 </td></tr>
                 <tr><td style="padding:20px 36px;border-top:1px solid #f0f0f0;background:#f9f9f8;">
-                  <p style="margin:0;font-size:12px;color:#bbb;">Visa For You — Automated Appointment System</p>
+                  <p style="margin:0;font-size:12px;color:#bbb;">Visa For You Consultancy — Automated Appointment System</p>
                 </td></tr>
               </table>
             </body>
@@ -78,40 +77,64 @@ def send_appointment_email(appointment: dict):
     except Exception as e:
         print(f"❌ Email error: {e}")
 
+# Per-session memory for Slack/WA users (web users use DB)
+session_data = {}  # { user_id: { name, email, phone, cgpa, degree } }
+
 def run_visa_agent(message: str, user_id: int, user_data: dict) -> str:
-    # Use user_id as string key for chat history
-    history_key = f"visa_{user_id}"
+    str_user_id = str(user_id)
 
-    # Get last 60 messages from DB
-    history = get_chat_history(user_id, limit=60)
+    # Merge DB user_data with session collected data
+    if str_user_id not in session_data:
+        session_data[str_user_id] = {}
+    session = session_data[str_user_id]
 
-    # Get RAG context
+    # Update session with any known user_data
+    for key in ["name", "email", "phone", "cgpa", "degree"]:
+        if user_data.get(key) and not session.get(key):
+            session[key] = user_data[key]
+
+    name   = session.get("name")   or user_data.get("name", "")
+    email  = session.get("email")  or user_data.get("email", "")
+    phone  = session.get("phone")  or user_data.get("phone", "")
+    cgpa   = session.get("cgpa")   or user_data.get("cgpa", "")
+    degree = session.get("degree") or user_data.get("degree", "")
+
+    # Get context from knowledge base
     context = get_relevant_context(message)
 
-    name   = user_data.get('name', 'Student')
-    email  = user_data.get('email', '')
-    cgpa   = user_data.get('cgpa', '')
-    degree = user_data.get('degree', '')
-    phone  = user_data.get('phone', '')
+    # Get last 20 messages for context
+    history = get_chat_history(user_id, limit=60)
 
-    system_prompt = f"""You are a study abroad consultant at Visa For You.
+    system_prompt = f"""You are a friendly study abroad consultant at Visa For You.
 
-Student: {name} | Email: {email} | CGPA: {cgpa} | Degree: {degree} | Phone: {phone}
+Student Profile:
+- Name: {name or 'Not provided'}
+- Email: {email or 'Not provided'}  
+- Phone: {phone or 'Not provided'}
+- CGPA: {cgpa or 'Not provided'}
+- Degree: {degree or 'Not provided'}
 
 KNOWLEDGE BASE:
 {context}
 
-RULES:
-- Be SHORT and DIRECT — max 3-4 lines per response
-- Ask ONE question at a time
-- If CGPA < 2.5: suggest Malaysia, China
-- If CGPA 2.5-3.0: suggest Canada, Australia, Malaysia  
-- If CGPA > 3.0: suggest UK, USA, Germany, Canada, Australia
-- Mention scholarships when relevant
-- For appointments: collect date, time, purpose then respond EXACTLY:
-  BOOK_APPOINTMENT|date|time|purpose
+YOUR JOB:
+1. If name/email/phone/CGPA/degree missing → ask ONE at a time
+2. Once profile complete → suggest countries based on CGPA:
+   - CGPA < 2.5: Malaysia, China
+   - CGPA 2.5-3.0: Canada, Australia, Malaysia  
+   - CGPA > 3.0: UK, USA, Germany, Canada, Australia
+3. Answer questions using knowledge base
+4. When student wants appointment → ask date and time → then output EXACTLY:
+   BOOK_APPOINTMENT|{{date}}|{{time}}|{{purpose}}
 
-Never write long paragraphs. Be concise."""
+RULES:
+- Keep responses SHORT (max 3-4 lines)
+- Ask ONE question at a time
+- Never show BOOK_APPOINTMENT text to student
+- Be warm and encouraging
+- Always save info student provides by updating your understanding
+
+When student gives their name, save it. When they give CGPA save it. Build profile gradually."""
 
     messages = [SystemMessage(content=system_prompt)]
     for msg in history[-20:]:
@@ -124,35 +147,46 @@ Never write long paragraphs. Be concise."""
     response = llm.invoke(messages)
     reply    = response.content
 
+    # Extract info from message to update session
+    _extract_and_save_session(str_user_id, message, reply)
+
     # Handle appointment booking
     if "BOOK_APPOINTMENT|" in reply:
         try:
-            parts   = reply.split("BOOK_APPOINTMENT|")[1].split("|")
-            date    = parts[0].strip()
-            time    = parts[1].strip()
-            purpose = parts[2].strip().split("\n")[0]
+            booking_part = reply.split("BOOK_APPOINTMENT|")[1]
+            parts        = booking_part.split("|")
+            date         = parts[0].strip()
+            time         = parts[1].strip()
+            purpose      = parts[2].strip().split("\n")[0]
 
+            # Use session data for client info
+            client_name  = session.get("name")  or name  or "Unknown"
+            client_email = session.get("email") or email or ""
+            client_phone = session.get("phone") or phone or ""
+            client_cgpa  = session.get("cgpa")  or cgpa  or ""
+            client_degree= session.get("degree")or degree or ""
+
+            # Create Trello card
             trello_desc = (
-                f"👤 Student: {name}\n"
-                f"📧 Email: {email}\n"
-                f"📞 Phone: {phone}\n"
-                f"🎓 CGPA: {cgpa}\n"
-                f"📚 Degree: {degree}\n"
+                f"👤 Student: {client_name}\n"
+                f"📧 Email: {client_email}\n"
+                f"📞 Phone: {client_phone}\n"
+                f"🎓 CGPA: {client_cgpa}\n"
+                f"📚 Degree: {client_degree}\n"
                 f"📅 Date: {date}\n"
                 f"🕐 Time: {time}\n"
                 f"📋 Purpose: {purpose}"
             )
-
             card_url = create_trello_appointment(
-                f"📅 {name} — {date} {time}",
+                f"📅 {client_name} — {date} {time}",
                 trello_desc
             )
 
             # Save appointment to DB
             create_appointment(
-                client_name=name,
-                client_email=email,
-                client_phone=phone,
+                client_name=client_name,
+                client_email=client_email,
+                client_phone=client_phone,
                 preferred_date=date,
                 preferred_time=time,
                 purpose=purpose,
@@ -160,31 +194,45 @@ Never write long paragraphs. Be concise."""
                 user_id=user_id
             )
 
-            # Send email
+            # Send email notification
             send_appointment_email({
-                "client_name":    name,
-                "client_email":   email,
-                "client_phone":   phone,
+                "client_name":    client_name,
+                "client_email":   client_email,
+                "client_phone":   client_phone,
                 "preferred_date": date,
                 "preferred_time": time,
                 "purpose":        purpose,
-                "cgpa":           cgpa,
-                "degree":         degree,
-                "trello_url":     card_url
+                "trello_url":     card_url,
+                "cgpa":           client_cgpa,
+                "degree":         client_degree,
             })
 
             reply = (
-                f"✅ Appointment booked!\n"
+                f"✅ Appointment booked!\n\n"
                 f"📅 {date} at {time}\n"
                 f"📋 {purpose}\n\n"
                 f"Our consultant will confirm via email. See you soon! 🎓"
             )
+
         except Exception as e:
-            print(f"❌ Appointment error: {e}")
-            reply = "✅ Appointment request received! Our team will contact you to confirm. 🎓"
+            print(f"❌ Appointment booking error: {e}")
+            reply = "I'd like to book your appointment. Could you please provide your preferred date and time?"
 
     # Save to DB
     save_chat_message(user_id, "user", message)
     save_chat_message(user_id, "ai",   reply)
 
     return reply
+
+def _extract_and_save_session(user_id: str, message: str, reply: str):
+    """Try to extract profile info from conversation"""
+    if user_id not in session_data:
+        session_data[user_id] = {}
+    # Simple keyword extraction — agent handles the actual extraction via prompting
+    msg_lower = message.lower()
+    if "cgpa" in msg_lower or any(c.isdigit() and "." in message for c in message):
+        # Try to find CGPA pattern like 3.5, 2.8 etc
+        import re
+        cgpa_match = re.search(r'\b[0-4]\.\d{1,2}\b', message)
+        if cgpa_match and not session_data[user_id].get("cgpa"):
+            session_data[user_id]["cgpa"] = cgpa_match.group()

@@ -363,9 +363,14 @@ def create_appointment(client_name: str, client_email: str, client_phone: str,
     db = SessionLocal()
     try:
         appt = Appointment(
-            user_id=user_id, client_name=client_name, client_email=client_email,
-            client_phone=client_phone, preferred_date=preferred_date,
-            preferred_time=preferred_time, purpose=purpose, trello_url=trello_url
+            user_id=user_id,
+            client_name=client_name,
+            client_email=client_email,
+            client_phone=client_phone,
+            preferred_date=preferred_date,
+            preferred_time=preferred_time,
+            purpose=purpose,
+            trello_url=trello_url
         )
         db.add(appt)
         db.commit()
@@ -373,7 +378,6 @@ def create_appointment(client_name: str, client_email: str, client_phone: str,
         return appt
     finally:
         db.close()
-
 def get_all_appointments():
     db = SessionLocal()
     try:
@@ -447,5 +451,72 @@ def get_all_clients():
             })
 
         return result
+    finally:
+        db.close()
+
+
+
+def delete_client(client_id: int):
+    db = SessionLocal()
+    try:
+        # Delete related messages and tasks first
+        db.query(ChatMessage).filter(ChatMessage.user_id == client_id).delete()
+        db.query(Message).filter(Message.client_id == client_id).delete()
+        db.query(Task).filter(Task.client_id == client_id).delete()
+        db.query(Appointment).filter(Appointment.user_id == client_id).delete()
+        db.query(Client).filter(Client.id == client_id).delete()
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"❌ Delete client error: {e}")
+        return False
+    finally:
+        db.close()
+
+def update_appointment_status(appointment_id: int, status: str):
+    db = SessionLocal()
+    try:
+        appt = db.query(Appointment).filter(Appointment.id == appointment_id).first()
+        if appt:
+            appt.status = status
+            db.commit()
+            return appt.trello_url
+        return ""
+    finally:
+        db.close()
+
+def add_client_manual(name: str, email: str, phone: str, company: str,
+                       channel: str, university: str = "", target_country: str = "",
+                       cgpa: str = "", degree: str = ""):
+    db = SessionLocal()
+    try:
+        client = Client(
+            name=name, email=email, phone=phone, company=company,
+            channel=channel, created_at=datetime.utcnow()
+        )
+        db.add(client)
+        db.commit()
+        db.refresh(client)
+        return client.id
+    finally:
+        db.close()
+
+def get_all_users():
+    db = SessionLocal()
+    try:
+        users = db.query(User).filter(User.is_admin == False).order_by(User.created_at.desc()).all()
+        return [
+            {
+                "id":         u.id,
+                "name":       u.name,
+                "email":      u.email,
+                "phone":      u.phone or "",
+                "cgpa":       u.cgpa or "",
+                "degree":     u.degree or "",
+                "created_at": u.created_at.strftime("%b %d, %Y") if u.created_at else "",
+            }
+            for u in users
+        ]
     finally:
         db.close()

@@ -274,10 +274,7 @@ async def whatsapp_webhook(request: Request):
         user_message = message_data["text"]["body"]
         print(f"📱 WhatsApp from {from_number}: {user_message}")
 
-        # Get or create DB client for this WA number
-        from db.database import get_or_create_client
-        from services.visa_agent import run_visa_agent
-
+        # ✅ Get integer client ID
         client_id = get_or_create_client(
             name=f"WA {from_number}",
             channel="whatsapp",
@@ -292,13 +289,13 @@ async def whatsapp_webhook(request: Request):
             "phone":  from_number,
         }
 
-        response = run_visa_agent(user_message, user_id=client_id, user_data=user_data)
+        # ✅ Pass integer client_id directly
+        response = run_visa_agent(user_message, user_id=int(client_id), user_data=user_data)
         send_whatsapp_message(from_number, response)
 
     except Exception as e:
         print(f"❌ WhatsApp error: {e}")
     return {"status": "ok"}
-
 @app.delete("/appointments/{appointment_id}")
 async def delete_appt(appointment_id: int, user=Depends(get_current_user)):
     if not user.get("is_admin"):
@@ -307,3 +304,64 @@ async def delete_appt(appointment_id: int, user=Depends(get_current_user)):
     if not success:
         raise HTTPException(status_code=404, detail="Appointment not found")
     return {"success": True}
+
+
+
+
+from db.database import (
+    delete_client, update_appointment_status,
+    add_client_manual, get_all_users
+)
+from services.trello_service import move_trello_card
+
+# Delete client
+@app.delete("/clients/{client_id}")
+async def delete_client_endpoint(client_id: int):
+    from db.database import delete_client
+    success = delete_client(client_id)
+    if not success:
+        raise HTTPException(status_code=400, detail="Could not delete client")
+    return {"success": True}
+
+# Add client manually
+@app.post("/clients")
+async def add_client(data: dict):
+    client_id = add_client_manual(
+        name=data.get("name", ""),
+        email=data.get("email", ""),
+        phone=data.get("phone", ""),
+        company=data.get("company", ""),
+        channel=data.get("channel", "web"),
+        university=data.get("university", ""),
+        target_country=data.get("target_country", ""),
+        cgpa=data.get("cgpa", ""),
+        degree=data.get("degree", ""),
+    )
+    return {"id": client_id, "success": True}
+
+# Get registered users (portal signups)
+@app.get("/users")
+async def get_users():
+    return get_all_users()
+
+# Update appointment status + sync Trello
+@app.patch("/appointments/{appt_id}")
+async def update_appointment(appt_id: int, data: dict):
+    new_status = data.get("status")
+    trello_url = update_appointment_status(appt_id, new_status)
+    if trello_url and new_status == "done":
+        move_trello_card(trello_url, "done")
+    return {"success": True}
+
+# Delete appointment
+@app.delete("/appointments/{appt_id}")
+async def delete_appointment(appt_id: int):
+    db = SessionLocal()
+    try:
+        appt = db.query(Appointment).filter(Appointment.id == appt_id).first()
+        if appt:
+            db.delete(appt)
+            db.commit()
+        return {"success": True}
+    finally:
+        db.close()

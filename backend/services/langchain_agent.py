@@ -244,16 +244,10 @@ def book_appointment(preferred_date: str, preferred_time: str, purpose: str, use
 
     # Save to DB
     create_appointment(
-        client_name=name, client_email=email, client_phone=phone,
-        preferred_date=preferred_date, preferred_time=preferred_time,
-        purpose=purpose, trello_url=card_url, db_user_id = get_or_create_client(
-      name=name,
-      channel=channel,
-      phone=phone,
-      email=email,
-      slack_id=info.get("slack_user_id", "")
-                )
-    )
+    client_name=name, client_email=email, client_phone=phone,
+    preferred_date=preferred_date, preferred_time=preferred_time,
+    purpose=purpose, trello_url=card_url, client_id=client_id
+)
 
     # Email notification
     client_dict  = {"name": name, "email": email, "phone": phone, "channel": channel}
