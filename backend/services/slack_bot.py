@@ -15,9 +15,7 @@ processed_events = set()
 
 @app.event("message")
 def handle_message(event, say):
-    if event.get("bot_id"):
-        return
-    if event.get("subtype"):
+    if event.get("bot_id") or event.get("subtype"):
         return
 
     event_id = event.get("client_msg_id") or event.get("ts")
@@ -28,21 +26,19 @@ def handle_message(event, say):
         processed_events.clear()
 
     text    = event.get("text", "").strip()
-    user_id = event.get("user", "default")
-
+    slack_uid = event.get("user", "default")
     if not text:
         return
 
-    # Get or create a DB user for this Slack user
+    # ✅ Use consistent integer ID from DB
     client_id = get_or_create_client(
-        name=f"Slack User {user_id}",
+        name=f"Slack User {slack_uid}",
         channel="slack",
-        slack_id=user_id
+        slack_id=slack_uid
     )
 
-    # Build basic user_data for visa agent
     user_data = {
-        "name":   f"Slack User {user_id}",
+        "name":   f"Slack User {slack_uid}",
         "email":  "",
         "cgpa":   "",
         "degree": "",
@@ -51,7 +47,6 @@ def handle_message(event, say):
 
     response = run_visa_agent(text, user_id=client_id, user_data=user_data)
     say(response)
-
 def start_slack_bot():
     handler = SocketModeHandler(app, os.getenv("SLACK_APP_TOKEN"))
     handler.start()

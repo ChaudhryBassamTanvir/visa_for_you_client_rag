@@ -10,6 +10,7 @@ from services.whatsapp_bot import send_whatsapp_message
 from services.auth import register_user, login_user, decode_token
 from services.visa_agent import run_visa_agent
 from services.rag_engine import load_knowledge_base
+from db.database import delete_appointment
 from db.database import (
     init_db, get_all_tasks, get_all_clients, get_dashboard_stats,
     update_task_status, update_task_status_by_trello_url,
@@ -297,3 +298,12 @@ async def whatsapp_webhook(request: Request):
     except Exception as e:
         print(f"❌ WhatsApp error: {e}")
     return {"status": "ok"}
+
+@app.delete("/appointments/{appointment_id}")
+async def delete_appt(appointment_id: int, user=Depends(get_current_user)):
+    if not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin only")
+    success = delete_appointment(appointment_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    return {"success": True}

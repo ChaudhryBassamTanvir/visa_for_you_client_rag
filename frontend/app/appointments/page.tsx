@@ -108,29 +108,42 @@ export default function AppointmentsPage() {
                 {a.purpose}
               </div>
 
-              <div className="flex flex-col gap-1">
-                <span
-                  className="text-[11px] px-2 py-[3px] rounded-md font-medium text-center"
-                  style={{
-                    background: statusColor[a.status]?.bg,
-                    color: statusColor[a.status]?.text,
-                    border: `0.5px solid ${statusColor[a.status]?.border}`
-                  }}
-                >
-                  {a.status}
-                </span>
-
-                {a.trello_url && (
-                  <a
-                    href={a.trello_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-[10px] text-[#3b5bdb] no-underline text-center"
-                  >
-                    Trello
-                  </a>
-                )}
-              </div>
+              // Replace the last column in appointments map
+<div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+  <span style={{
+    fontSize: "11px", padding: "3px 8px", borderRadius: "6px",
+    background: statusColor[a.status]?.bg,
+    color: statusColor[a.status]?.text,
+    border: `0.5px solid ${statusColor[a.status]?.border}`,
+    fontWeight: "500", textAlign: "center"
+  }}>
+    {a.status}
+  </span>
+  {a.trello_url && (
+    <a href={a.trello_url} target="_blank" rel="noreferrer"
+      style={{ fontSize: "10px", color: "#3b5bdb", textDecoration: "none", textAlign: "center" }}>
+      Trello
+    </a>
+  )}
+  <button
+    onClick={async () => {
+      if (!confirm("Delete this appointment?")) return
+      const token = localStorage.getItem("token")
+      await fetch(`http://127.0.0.1:8000/appointments/${a.id}`, {
+        method: "DELETE",
+        headers: { "Authorization": `Bearer ${token}` }
+      })
+      setAppointments(prev => prev.filter(x => x.id !== a.id))
+    }}
+    style={{
+      fontSize: "10px", padding: "3px 8px", borderRadius: "6px",
+      background: "#fef2f2", color: "#dc2626",
+      border: "0.5px solid #fecaca", cursor: "pointer"
+    }}
+  >
+    Delete
+  </button>
+</div>
             </div>
           ))}
         </div>

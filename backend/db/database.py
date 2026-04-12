@@ -395,3 +395,57 @@ def get_all_appointments():
         ]
     finally:
         db.close()
+
+
+def delete_appointment(appointment_id: int):
+    db = SessionLocal()
+    try:
+        appt = db.query(Appointment).filter(Appointment.id == appointment_id).first()
+        if appt:
+            db.delete(appt)
+            db.commit()
+            return True
+        return False
+    finally:
+        db.close()
+
+def get_all_clients():
+    db = SessionLocal()
+    try:
+        # Get from clients table
+        clients = db.query(Client).order_by(Client.created_at.desc()).all()
+        result  = [
+            {
+                "id":              c.id,
+                "name":            c.name,
+                "email":           c.email or "",
+                "phone":           c.phone or "",
+                "company":         c.company or "",
+                "channel":         c.channel,
+                "task_count":      len(c.tasks),
+                "created_at":      c.created_at.strftime("%b %d, %Y") if c.created_at else "",
+                "whatsapp_number": c.phone if c.channel == "whatsapp" else "",
+                "slack_id":        c.slack_id or "",
+            }
+            for c in clients
+        ]
+
+        # Also include web users (from users table) as clients
+        users = db.query(User).filter(User.is_admin == False).order_by(User.created_at.desc()).all()
+        for u in users:
+            result.append({
+                "id":              f"u_{u.id}",
+                "name":            u.name,
+                "email":           u.email or "",
+                "phone":           u.phone or "",
+                "company":         "",
+                "channel":         "web",
+                "task_count":      0,
+                "created_at":      u.created_at.strftime("%b %d, %Y") if u.created_at else "",
+                "whatsapp_number": "",
+                "slack_id":        "",
+            })
+
+        return result
+    finally:
+        db.close()
