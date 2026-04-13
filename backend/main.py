@@ -10,6 +10,14 @@ from services.auth import register_user, login_user, decode_token
 from services.visa_agent import run_visa_agent
 from services.rag_engine import load_knowledge_base
 from services.trello_service import move_trello_card
+
+# # ✅ Add this temporarily — run once then remove
+# from db.database import Base, engine, ChatMessage
+# ChatMessage.__table__.drop(engine, checkfirst=True)
+# ChatMessage.__table__.create(engine, checkfirst=True)
+# print("✅ ChatMessage table recreated without FK constraint")
+
+
 from db.database import (
     init_db, get_all_tasks, get_all_clients, get_dashboard_stats,
     update_task_status, update_task_status_by_trello_url,
