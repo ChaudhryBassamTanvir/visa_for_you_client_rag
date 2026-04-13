@@ -1,5 +1,4 @@
 "use client"
-
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import Sidebar from "@/components/Sidebar"
@@ -24,14 +23,10 @@ export default function AppointmentsPage() {
 
   const fetchAppointments = async () => {
     const token = localStorage.getItem("token")
-
     try {
       const res = await fetch("http://127.0.0.1:8000/appointments", {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { Authorization: `Bearer ${token}` },
       })
-
       const data = await res.json()
       setAppointments(data)
     } catch (error) {
@@ -43,7 +38,6 @@ export default function AppointmentsPage() {
 
   const toggleStatus = async (id: number, currentStatus: string) => {
     const newStatus = currentStatus === "done" ? "pending" : "done"
-
     try {
       await fetch(`http://127.0.0.1:8000/appointments/${id}`, {
         method: "PATCH",
@@ -53,11 +47,8 @@ export default function AppointmentsPage() {
         },
         body: JSON.stringify({ status: newStatus }),
       })
-
       setAppointments((prev) =>
-        prev.map((a) =>
-          a.id === id ? { ...a, status: newStatus } : a
-        )
+        prev.map((a) => (a.id === id ? { ...a, status: newStatus } : a))
       )
     } catch (error) {
       console.error("Failed to update status", error)
@@ -66,15 +57,11 @@ export default function AppointmentsPage() {
 
   const deleteAppt = async (id: number) => {
     if (!confirm("Delete this appointment?")) return
-
     try {
       await fetch(`http://127.0.0.1:8000/appointments/${id}`, {
         method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem("token")}`,
-        },
+        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
       })
-
       setAppointments((prev) => prev.filter((a) => a.id !== id))
     } catch (error) {
       console.error("Delete failed", error)
@@ -84,179 +71,138 @@ export default function AppointmentsPage() {
   useEffect(() => {
     const token = localStorage.getItem("token")
     const user = JSON.parse(localStorage.getItem("user") || "{}")
-
     if (!token || !user.is_admin) {
       router.push("/login")
       return
     }
-
     fetchAppointments()
   }, [router])
 
-  const statusColor: Record<
-    string,
-    { bg: string; text: string; border: string }
-  > = {
-    pending: {
-      bg: "#fffbeb",
-      text: "#92400e",
-      border: "#fde68a",
-    },
-    done: {
-      bg: "#f0fdf4",
-      text: "#15803d",
-      border: "#bbf7d0",
-    },
-    confirmed: {
-      bg: "#eff6ff",
-      text: "#1d4ed8",
-      border: "#bfdbfe",
-    },
-    cancelled: {
-      bg: "#fef2f2",
-      text: "#dc2626",
-      border: "#fecaca",
-    },
+  const statusStyles: Record<string, { bg: string; text: string; dot: string }> = {
+    pending:   { bg: "bg-amber-50  text-amber-700  border-amber-200",  dot: "bg-amber-400" },
+    done:      { bg: "bg-emerald-50 text-emerald-700 border-emerald-200", dot: "bg-emerald-400" },
+    confirmed: { bg: "bg-blue-50   text-blue-700   border-blue-200",   dot: "bg-blue-400" },
+    cancelled: { bg: "bg-red-50    text-red-600    border-red-200",    dot: "bg-red-400" },
   }
 
   return (
-    <div className="flex">
+    <div className="flex bg-white min-h-screen">
       <Sidebar />
 
-      <main className="ml-[220px] min-h-screen flex-1 bg-[#f9f9f8] px-9 py-8">
-        <div className="mb-6">
-          <h1 className="m-0 text-[20px] font-medium tracking-[-0.3px]">
-            Appointments
-          </h1>
-          <p className="mt-1 text-[13px] text-[#999]">
-            {appointments.length} total appointments
-          </p>
+      <main className="ml-[240px] flex-1 min-h-screen bg-gray-50 px-8 py-8">
+
+        {/* Page header */}
+        <div className="mb-8">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-lg">📅</span>
+            <h1 className="text-xl font-bold text-gray-900 tracking-tight">Appointments</h1>
+          </div>
+          <p className="text-sm text-gray-400 ml-7">{appointments.length} total appointments</p>
         </div>
 
-        <div className="overflow-hidden rounded-[10px] border border-[#e8e8e6] bg-white">
-          {/* Header */}
-          <div className="grid grid-cols-[1.5fr_1.5fr_1fr_1fr_1fr_180px] gap-3 border-b border-[#e8e8e6] bg-[#f9f9f8] px-5 py-[14px]">
-            {[
-              "Client",
-              "Contact",
-              "Date",
-              "Time",
-              "Purpose",
-              "Actions",
-            ].map((h) => (
-              <div
-                key={h}
-                className="text-[11px] font-medium uppercase tracking-[0.8px] text-[#999]"
-              >
-                {h}
+        {/* Summary chips */}
+        <div className="flex gap-3 mb-6">
+          {["pending", "confirmed", "done", "cancelled"].map((s) => {
+            const count = appointments.filter(a => a.status === s).length
+            const st = statusStyles[s]
+            return (
+              <div key={s} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-medium ${st.bg}`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${st.dot}`} />
+                {s.charAt(0).toUpperCase() + s.slice(1)} · {count}
               </div>
+            )
+          })}
+        </div>
+
+        {/* Table */}
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          {/* Col headers */}
+          <div className="grid grid-cols-[1.5fr_1.5fr_1fr_1fr_1.5fr_190px] px-5 py-2.5 border-b border-gray-100 bg-gray-50">
+            {["Client", "Contact", "Date", "Time", "Purpose", "Actions"].map(h => (
+              <div key={h} className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">{h}</div>
             ))}
           </div>
 
-          {/* Content */}
           {loading ? (
-            <div className="p-10 text-center text-[13px] text-[#bbb]">
-              Loading...
-            </div>
+            <div className="p-12 text-center text-sm text-gray-300">Loading...</div>
           ) : appointments.length === 0 ? (
-            <div className="p-10 text-center text-[13px] text-[#bbb]">
-              No appointments yet.
-            </div>
+            <div className="p-12 text-center text-sm text-gray-300">No appointments yet.</div>
           ) : (
-            appointments.map((a, i) => (
-              <div
-                key={a.id}
-                className="grid grid-cols-[1.5fr_1.5fr_1fr_1fr_1fr_180px] items-center gap-3 px-5 py-[14px]"
-                style={{
-                  borderBottom:
-                    i < appointments.length - 1
-                      ? "0.5px solid #f0f0ef"
-                      : "none",
-                }}
-              >
-                {/* Client */}
-                <div>
-                  <div className="text-[13px] font-medium text-[#1a1a1a]">
-                    {a.client_name}
+            appointments.map((a, i) => {
+              const st = statusStyles[a.status] || statusStyles.pending
+              return (
+                <div
+                  key={a.id}
+                  className={`grid grid-cols-[1.5fr_1.5fr_1fr_1fr_1.5fr_190px] items-center px-5 py-4 hover:bg-gray-50 transition-colors ${
+                    i < appointments.length - 1 ? "border-b border-gray-100" : ""
+                  }`}
+                >
+                  {/* Client */}
+                  <div>
+                    <div className="text-sm font-medium text-gray-900">{a.client_name}</div>
+                    <div className="text-[11px] text-gray-400 mt-0.5">{a.created_at}</div>
                   </div>
-                  <div className="text-[11px] text-[#999]">
-                    {a.created_at}
+
+                  {/* Contact */}
+                  <div>
+                    <div className="text-xs text-gray-600">{a.client_email}</div>
+                    <div className="text-xs text-gray-400 mt-0.5">{a.client_phone}</div>
+                  </div>
+
+                  {/* Date */}
+                  <div className="text-xs font-medium text-gray-800">{a.preferred_date}</div>
+
+                  {/* Time */}
+                  <div className="text-xs font-medium text-gray-800">{a.preferred_time}</div>
+
+                  {/* Purpose */}
+                  <div className="text-xs text-gray-500 truncate pr-2">{a.purpose}</div>
+
+                  {/* Actions */}
+                  <div className="flex flex-col gap-1.5">
+                    {/* Status badge */}
+                    <span className={`inline-flex items-center gap-1.5 text-[10px] font-semibold px-2 py-1 rounded-md border w-fit ${st.bg}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${st.dot}`} />
+                      {a.status}
+                    </span>
+
+                    <div className="flex gap-1.5 flex-wrap">
+                      {/* Toggle */}
+                      <button
+                        onClick={() => toggleStatus(a.id, a.status)}
+                        className={`text-[10px] font-medium px-2 py-1 rounded-md border transition-colors ${
+                          a.status === "done"
+                            ? "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100"
+                            : "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
+                        }`}
+                      >
+                        {a.status === "done" ? "↺ Pending" : "✓ Done"}
+                      </button>
+
+                      {/* Delete */}
+                      <button
+                        onClick={() => deleteAppt(a.id)}
+                        className="text-[10px] font-medium px-2 py-1 rounded-md border bg-red-50 text-red-500 border-red-100 hover:bg-red-100 transition-colors"
+                      >
+                        Delete
+                      </button>
+                    </div>
+
+                    {/* Trello */}
+                    {a.trello_url && (
+                      <a
+                        href={a.trello_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[10px] text-blue-500 hover:underline w-fit"
+                      >
+                        → View on Trello
+                      </a>
+                    )}
                   </div>
                 </div>
-
-                {/* Contact */}
-                <div>
-                  <div className="text-xs text-[#444]">
-                    {a.client_email}
-                  </div>
-                  <div className="text-xs text-[#999]">
-                    {a.client_phone}
-                  </div>
-                </div>
-
-                {/* Date */}
-                <div className="text-xs text-[#1a1a1a]">
-                  {a.preferred_date}
-                </div>
-
-                {/* Time */}
-                <div className="text-xs text-[#1a1a1a]">
-                  {a.preferred_time}
-                </div>
-
-                {/* Purpose */}
-                <div className="overflow-hidden text-ellipsis whitespace-nowrap text-xs text-[#666]">
-                  {a.purpose}
-                </div>
-
-                {/* Actions */}
-                <div className="flex flex-col gap-2">
-                  <span
-                    className="rounded-md border px-2 py-[3px] text-center text-[11px] font-medium"
-                    style={{
-                      backgroundColor: statusColor[a.status]?.bg,
-                      color: statusColor[a.status]?.text,
-                      borderColor: statusColor[a.status]?.border,
-                    }}
-                  >
-                    {a.status}
-                  </span>
-
-                  <button
-                    onClick={() =>
-                      toggleStatus(a.id, a.status)
-                    }
-                    className={`rounded-md border px-2 py-[3px] text-[10px] font-medium ${
-                      a.status === "done"
-                        ? "bg-yellow-50 text-yellow-700 border-yellow-200"
-                        : "bg-green-50 text-green-700 border-green-200"
-                    }`}
-                  >
-                    {a.status === "done"
-                      ? "↺ Mark Pending"
-                      : "✓ Mark Done"}
-                  </button>
-
-                  {a.trello_url && (
-                    <a
-                      href={a.trello_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-center text-[10px] text-blue-600 hover:underline"
-                    >
-                      Trello
-                    </a>
-                  )}
-
-                  <button
-                    onClick={() => deleteAppt(a.id)}
-                    className="rounded-md border border-red-200 bg-red-50 px-2 py-[3px] text-[10px] text-red-600 hover:bg-red-100"
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
-            ))
+              )
+            })
           )}
         </div>
       </main>
