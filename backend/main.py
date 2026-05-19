@@ -8,15 +8,9 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from services.whatsapp_bot import send_whatsapp_message
 from services.auth import register_user, login_user, decode_token
 from services.visa_agent import run_visa_agent
+from services.langchain_agent import run_agent, is_duplicate_message
 from services.rag_engine import load_knowledge_base
 from services.trello_service import move_trello_card
-
-# # ✅ Add this temporarily — run once then remove
-# from db.database import Base, engine, ChatMessage
-# ChatMessage.__table__.drop(engine, checkfirst=True)
-# ChatMessage.__table__.create(engine, checkfirst=True)
-# print("✅ ChatMessage table recreated without FK constraint")
-
 
 from db.database import (
     init_db, get_all_tasks, get_all_clients, get_dashboard_stats,
@@ -28,6 +22,7 @@ from db.database import (
     Appointment, SessionLocal
 )
 from dotenv import load_dotenv
+import resend
 
 load_dotenv()
 
@@ -42,7 +37,6 @@ app.add_middleware(
 )
 
 security = HTTPBearer()
-
 init_db()
 load_knowledge_base()
 
@@ -131,7 +125,7 @@ async def visa_chat(data: dict, user=Depends(get_current_user)):
     message = data.get("message", "").strip()
     if not message:
         raise HTTPException(status_code=400, detail="Message required")
-    db_user = get_user_by_email(user["email"])
+    db_user   = get_user_by_email(user["email"])
     user_data = {
         "name":   db_user.name,
         "email":  db_user.email,
@@ -224,8 +218,114 @@ async def delete_appt(appt_id: int, user=Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Not found")
     return {"success": True}
 
+# ──────────────────────────────────────────────────────────────────
+# ✅  NEW: Send confirmation email to client from Appointments page
+# ──────────────────────────────────────────────────────────────────
+@app.post("/appointments/{appt_id}/send-email")
+async def send_appt_email_to_client(appt_id: int, user=Depends(get_current_user)):
+    """Admin clicks 'Send to client' → fires the confirmation email to the client."""
+    if not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    db = SessionLocal()
+    try:
+        appt = db.query(Appointment).filter(Appointment.id == appt_id).first()
+        if not appt:
+            raise HTTPException(status_code=404, detail="Appointment not found")
+        if not appt.client_email:
+            raise HTTPException(status_code=400, detail="No email on record for this appointment")
+
+        resend.api_key = os.getenv("RESEND_API_KEY")
+        rows = "".join(
+            f'<tr><td style="padding:8px 16px;font-size:12px;color:#999;width:160px;border-bottom:1px solid #f0f0f0">{k}</td>'
+            f'<td style="padding:8px 16px;font-size:14px;color:#1a1a1a;border-bottom:1px solid #f0f0f0">{v}</td></tr>'
+            for k, v in {
+                "Date":    appt.preferred_date,
+                "Time":    appt.preferred_time,
+                "Purpose": appt.purpose,
+            }.items() if v
+        )
+        html = f"""
+        <body style="font-family:Arial,sans-serif;background:#f4f4f0;padding:40px 0;">
+          <table width="600" style="margin:auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e8e8e6;">
+            <tr><td style="background:#1a1a1a;padding:28px 36px;">
+              <p style="margin:0;font-size:11px;color:#888;letter-spacing:2px;text-transform:uppercase">Visa For You</p>
+              <h1 style="margin:8px 0 0;font-size:20px;font-weight:500;color:#fff;">Appointment Confirmed ✓</h1>
+            </td></tr>
+            <tr><td style="padding:28px 36px;">
+              <p style="margin:0 0 6px;font-size:22px;font-weight:600;color:#111;">Hi {appt.client_name},</p>
+              <p style="margin:0 0 24px;font-size:14px;color:#888;">Your consultation with Visa For You is confirmed:</p>
+              <table width="100%" style="border:1px solid #e8e8e6;border-radius:8px;overflow:hidden;margin-bottom:24px;">{rows}</table>
+              <p style="font-size:13px;color:#888;margin:0;">
+                Our consultant will reach out before the appointment.
+                Reply to this email if you need to reschedule.
+              </p>
+            </td></tr>
+            <tr><td style="padding:20px 36px;border-top:1px solid #f0f0f0;background:#f9f9f8;">
+              <p style="margin:0;font-size:12px;color:#bbb;">Visa For You · team@dstech.pk</p>
+            </td></tr>
+          </table>
+        </body>
+        """
+        resend.Emails.send({
+            "from":    "Visa For You <onboarding@resend.dev>",
+            "to":      appt.client_email,
+            "subject": "Your Appointment is Confirmed — Visa For You",
+            "html":    html,
+        })
+
+        # Mark email_sent on the appointment (optional field — add to model if needed)
+        if hasattr(appt, "email_sent"):
+            appt.email_sent = True
+            db.commit()
+
+        print(f"✅ Confirmation email sent to {appt.client_email}")
+        return {"success": True, "sent_to": appt.client_email}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ send-email error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+# ──────────────────────────────────────────────────────────────────
+# ✅  NEW: Promote appointment → Client record
+# ──────────────────────────────────────────────────────────────────
+@app.post("/appointments/{appt_id}/promote-to-client")
+async def promote_to_client(appt_id: int, user=Depends(get_current_user)):
+    """
+    When admin clicks 'Add as Client' on a done appointment,
+    this creates / updates the client record from the appointment data.
+    """
+    if not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    db = SessionLocal()
+    try:
+        appt = db.query(Appointment).filter(Appointment.id == appt_id).first()
+        if not appt:
+            raise HTTPException(status_code=404, detail="Appointment not found")
+
+        client_id = get_or_create_client(
+            name    = appt.client_name  or "Unknown",
+            channel = "web",
+            phone   = appt.client_phone or "",
+            email   = appt.client_email or "",
+        )
+
+        # Mark as promoted so the UI can reflect it
+        if hasattr(appt, "promoted_to_client"):
+            appt.promoted_to_client = True
+            db.commit()
+
+        return {"success": True, "client_id": client_id}
+    finally:
+        db.close()
+
 # ============================
-# 📱 WHATSAPP WEBHOOK — ONLY ONE
+# 📱 WHATSAPP WEBHOOK
 # ============================
 @app.get("/whatsapp/webhook")
 async def verify_webhook(request: Request):
@@ -241,14 +341,20 @@ async def verify_webhook(request: Request):
 async def whatsapp_webhook(request: Request):
     data = await request.json()
     try:
-        entry        = data["entry"][0]
-        changes      = entry["changes"][0]
-        value        = changes["value"]
+        entry   = data["entry"][0]
+        changes = entry["changes"][0]
+        value   = changes["value"]
         if "messages" not in value:
             return {"status": "no message"}
 
         message_data = value["messages"][0]
         from_number  = message_data["from"]
+
+        # ── Dedup using WhatsApp message ID ───────────────────
+        wa_msg_id = message_data.get("id", "")
+        if wa_msg_id and is_duplicate_message(wa_msg_id):
+            print(f"⚠️  Duplicate WhatsApp message {wa_msg_id} — ignoring")
+            return {"status": "duplicate"}
 
         if message_data.get("type") != "text":
             send_whatsapp_message(from_number, "Sorry, I can only process text messages.")
@@ -257,23 +363,15 @@ async def whatsapp_webhook(request: Request):
         user_message = message_data["text"]["body"]
         print(f"📱 WhatsApp from {from_number}: {user_message}")
 
-        # ✅ Get integer client ID
         client_id = get_or_create_client(
-            name=f"WA {from_number}",
-            channel="whatsapp",
-            phone=from_number
+            name=f"WA {from_number}", channel="whatsapp", phone=from_number
         )
-
         user_data = {
-            "name":   f"WA {from_number}",
-            "email":  "",
-            "cgpa":   "",
-            "degree": "",
-            "phone":  from_number,
+            "name": f"WA {from_number}", "email": "", "cgpa": "", "degree": "", "phone": from_number,
         }
-
         response = run_visa_agent(user_message, user_id=int(client_id), user_data=user_data)
-        send_whatsapp_message(from_number, response)
+        if response:
+            send_whatsapp_message(from_number, response)
 
     except Exception as e:
         print(f"❌ WhatsApp error: {e}")
@@ -304,7 +402,10 @@ async def trello_webhook(request: Request):
             return {"status": "no list change"}
         card_url   = f"https://trello.com/c/{card.get('shortLink', '')}"
         list_name  = list_after.get("name", "").lower()
-        status_map = {"to do": "pending", "doing": "in_progress", "in progress": "in_progress", "done": "done"}
+        status_map = {
+            "to do": "pending", "doing": "in_progress",
+            "in progress": "in_progress", "done": "done"
+        }
         new_status = status_map.get(list_name)
         if new_status:
             update_task_status_by_trello_url(card_url, new_status)
